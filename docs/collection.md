@@ -129,6 +129,33 @@ change the assessed source set.
 
 These checks describe the latest observations, not complete coverage of an arbitrary
 historical window. Continue to inspect brief coverage and incident evidence.
+Use the [readiness troubleshooting table](#readiness-troubleshooting) to identify
+the missing observation and a diagnostic next step.
+
+### Readiness troubleshooting
+
+Run the commands below as the collection identity. `PATH` means the actual
+collector configuration path, for example `~/.config/hostdelta/config.json`.
+The systemd commands apply to the supplied Linux user unit; they do not establish
+readiness on their own. Inspect `heartbeat_assessment.reason` separately from each
+entry in `sources`: a recent heartbeat does not establish that every source is
+ready. A successful collection can contain zero events.
+
+| Symptom | JSON field or reason | Diagnostic command | Interpretation and safe next step |
+| --- | --- | --- | --- |
+| No observation | `heartbeat_assessment.reason` or `sources[].reason`: `never_collected` | `hostdelta status --json` | No timestamp is recorded. Check the configured source and whether collection has run; inspect service status and journal if using the user unit. |
+| Observation too old | `stale`, `age_seconds`, `max_age_seconds` | `hostdelta status --json` | The observation exceeds its cadence threshold. Check the service and source warnings; allow a collection cycle and inspect status again. |
+| Source did not succeed | `sources[].reason: source_unhealthy`, `status`, `warnings` | `hostdelta status --json` | A recent source run did not report `ok`. Inspect its warnings and configuration; consult the administrator about access if needed. |
+| Timestamp in the future | `clock_skew`, `age_seconds` | `hostdelta status --json` | The stored observation is later than the assessment time. Investigate the recorded timestamp and host time with the administrator; do not assume a cause. |
+| Timestamp cannot be assessed | `invalid_timestamp` | `hostdelta status --json` | The stored timestamp is invalid or lacks timezone information. Inspect the affected observation and seek assistance before changing retained state. |
+| Collector stopped | `heartbeat_assessment.reason: stopped` | `systemctl --user status hostdelta-collector.service` | The heartbeat records a stop. Inspect `journalctl --user -u hostdelta-collector.service -n 50 --no-pager` and the intended service state before restarting. |
+| Last cycle unhealthy | `heartbeat_assessment.reason: last_cycle_unhealthy` | `hostdelta status --json` | The heartbeat is recent but the last cycle was not healthy. Inspect source statuses and warnings, then the user-unit journal if applicable. |
+| Historical source not enabled | `sources[].configured: false`, `reason: not_configured` | `hostdelta config --check PATH --json` | A previously recorded source is not in the last saved collector configuration and does not block current readiness. Compare the intended config; edits take effect after collection uses them. |
+| Archive coverage remains incomplete | `coverage.readiness`, `coverage.collection_ok`, `coverage.warnings` | `hostdelta brief --archive --since 1h --require-coverage --json` | Current recovery does not erase historical source failures, retention gaps or other coverage gaps. Inspect the requested window and warnings. |
+
+Service status and journal diagnostics are also useful for missing or stale
+heartbeats. Treat logs as untrusted and redact private information before sharing
+diagnostic output. No sample log output is shown here.
 
 ## Restarts and outage intervals
 
