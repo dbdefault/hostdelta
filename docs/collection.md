@@ -1,8 +1,10 @@
 # Continuous collection
 
-Run the source-checkout commands below from the repository root after installing
-HostDelta and initializing its state under the intended operating identity.
-
+On Linux with systemd, use the same intended user identity for installation,
+initialization, collection and queries. Install the executable at
+`~/.local/bin/hostdelta` and initialize its state first; see the
+[installation instructions](../README.md#installation). Run the following
+source-checkout commands from the repository root.
 
 Create a configuration and validate it before starting the collector:
 
@@ -14,20 +16,75 @@ hostdelta collect --config ~/.config/hostdelta/config.json --json
 hostdelta daemon --config ~/.config/hostdelta/config.json
 ```
 
-The daemon runs in the foreground. To supervise it as a user service:
+The daemon runs in the foreground. Stop it before starting the user service.
+After checking that the configuration is valid and selecting only the sources
+you intend to collect, install and start the supplied user unit from the
+repository root:
 
 ```bash
 mkdir -p ~/.config/systemd/user
 cp examples/systemd/hostdelta-collector.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now hostdelta-collector.service
+systemctl --user status hostdelta-collector.service
+journalctl --user -u hostdelta-collector.service -n 50 --no-pager
 hostdelta status --json
 ```
 
 The user unit expects `~/.local/bin/hostdelta`. An optional private environment file
 at `~/.config/hostdelta/credentials.env` supplies adapter credentials. It is not a
-shell script. See [operations](operations.md) for permissions, a system-service
-installation, uninterrupted collection after logout, retention, backups and upgrades.
+shell script. The unit has `PrivateTmp=true`: a file in the shell's `/tmp` is not
+the same fixture visible to the service. For an application log example, use an
+existing persistent user-owned file such as `~/.local/share/hostdelta/application.jsonl`;
+put its absolute path in the configuration and ensure the operating identity can
+read it. See [operations](operations.md) for permissions, a system-service
+installation, retention, backups and upgrades.
+
+The user manager may exit on logout. If uninterrupted collection is needed, an
+administrator can enable lingering for the chosen account; this walkthrough does
+not enable it or change privileges.
+
+### Change, diagnose and stop the user service
+
+The following commands can be run from any working directory as the same user.
+Configuration is loaded at process start. After editing the collector config,
+validate it, restart the service and check its status:
+
+```bash
+hostdelta config --check ~/.config/hostdelta/config.json
+systemctl --user restart hostdelta-collector.service
+systemctl --user status hostdelta-collector.service
+journalctl --user -u hostdelta-collector.service -n 50 --no-pager
+hostdelta status --json
+```
+
+If you edit the installed unit itself, reload the user manager before restarting
+and checking it:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart hostdelta-collector.service
+systemctl --user status hostdelta-collector.service
+```
+
+To stop collection and disable automatic startup, without removing data:
+
+```bash
+systemctl --user disable --now hostdelta-collector.service
+```
+
+To resume with the installed unit, run `systemctl --user enable --now
+hostdelta-collector.service` and check its status as above. Alternatively, after
+stopping and disabling it, optionally remove only the installed unit and reload:
+
+```bash
+rm ~/.config/systemd/user/hostdelta-collector.service
+systemctl --user daemon-reload
+```
+
+The database, configuration and logs are preserved by default. To resume after
+removing the unit, repeat the copy, reload and enable steps from the repository
+root. Collection during a stopped interval is not established by restarting.
 
 The collector defaults to a 30-second cycle, 15-minute state snapshots and 30-day
 retention. It stores normalized records and source checkpoints together, so a crash
